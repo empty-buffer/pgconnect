@@ -1,0 +1,14 @@
+[package]
+name = "pgconnect"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+rusqlite = { version = "0.31", features = ["bundled"] }
+dialoguer = "0.11"
+aes-gcm = "0.10"
+argon2 = "0.5"
+directories = "5"
+rand = "0.8"
+anyhow = "1"
