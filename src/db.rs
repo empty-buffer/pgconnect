@@ -20,8 +20,6 @@ impl Database {
     pub fn open() -> Result<Self> {
         let db_path = Self::get_db_path()?;
 
-        println!("{:?}", db_path);
-
         // Ensure parent directory exists
         if let Some(parent) = db_path.parent() {
             fs::create_dir_all(parent)?;
@@ -287,5 +285,37 @@ impl Database {
             .conn
             .query_row("SELECT COUNT(*) FROM connections", [], |row| row.get(0))?;
         Ok(count as usize)
+    }
+
+    /// Gets the preferred client from settings
+    pub fn get_preferred_client(&self) -> Result<Option<String>> {
+        let result = self.conn.query_row(
+            "SELECT value FROM settings WHERE key = 'preferred_client'",
+            [],
+            |row| {
+                let value: Vec<u8> = row.get(0)?;
+                String::from_utf8(value)
+                    .map_err(|e| rusqlite::Error::FromSqlConversionFailure(
+                        0,
+                        rusqlite::types::Type::Blob,
+                        Box::new(e)
+                    ))
+            },
+        );
+
+        match result {
+            Ok(client) => Ok(Some(client)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    /// Sets the preferred client in settings
+    pub fn set_preferred_client(&self, client: &str) -> Result<()> {
+        self.conn.execute(
+            "INSERT OR REPLACE INTO settings (key, value) VALUES ('preferred_client', ?)",
+            params![client.as_bytes()],
+        )?;
+        Ok(())
     }
 }

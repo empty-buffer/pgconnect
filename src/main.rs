@@ -1,3 +1,4 @@
+mod client;
 mod connection;
 mod crypto;
 mod db;
@@ -8,8 +9,8 @@ use clap::{Parser, Subcommand};
 
 use crate::db::Database;
 use crate::ui::{
-    confirm_remove, ensure_unlocked, interactive_select, list_connections,
-    prompt_connection_details,
+    change_preferred_client, confirm_remove, ensure_unlocked, interactive_select,
+    list_connections, prompt_connection_details,
 };
 
 #[derive(Parser)]
@@ -37,6 +38,8 @@ enum Commands {
         /// Name of the connection to remove
         name: String,
     },
+    /// Set preferred PostgreSQL client (psql or pgcli)
+    SetClient,
 }
 
 fn main() -> Result<()> {
@@ -98,6 +101,9 @@ fn main() -> Result<()> {
             } else {
                 println!("Cancelled.");
             }
+        }
+        Some(Commands::SetClient) => {
+            change_preferred_client(&db)?;
         }
     }
 
