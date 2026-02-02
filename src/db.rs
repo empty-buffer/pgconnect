@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Result};
+use crate::error::{Error, Result};
 use directories::ProjectDirs;
 use rusqlite::{params, Connection as SqliteConnection};
 use std::fs;
@@ -38,7 +38,7 @@ impl Database {
     /// Gets the database file path
     fn get_db_path() -> Result<PathBuf> {
         let proj_dirs = ProjectDirs::from("com", "pgconnect", "pgconnect")
-            .ok_or_else(|| anyhow!("Could not determine data directory"))?;
+            .ok_or_else(|| Error::core("Could not determine data directory"))?;
 
         let data_dir = proj_dirs.data_dir();
         Ok(data_dir.join("pgconnect.db"))
@@ -84,7 +84,7 @@ impl Database {
     /// Sets up the master password (first time setup)
     pub fn setup_master_password(&mut self, master_password: &str) -> Result<()> {
         if self.is_initialized()? {
-            return Err(anyhow!("Master password already set up"));
+            return Err(Error::core("Master password already set up"));
         }
 
         let hash = hash_master_password(master_password)?;
@@ -136,7 +136,7 @@ impl Database {
     fn get_key(&self) -> Result<&[u8; 32]> {
         self.encryption_key
             .as_ref()
-            .ok_or_else(|| anyhow!("Database not unlocked"))
+            .ok_or_else(|| Error::core("Database not unlocked"))
     }
 
     /// Adds a new connection
@@ -183,7 +183,7 @@ impl Database {
                     row.get::<_, Vec<u8>>(7)?,
                 ))
             })?
-            .collect::<Result<Vec<_>, _>>()?;
+            .collect::<std::result::Result<Vec<_>, rusqlite::Error>>()?;
 
         let mut result = Vec::new();
         for (id, name, host, port, database, username, encrypted_password, nonce) in connections {
@@ -263,7 +263,7 @@ impl Database {
         )?;
 
         if rows == 0 {
-            return Err(anyhow!("Connection '{}' not found", conn.name));
+            return Err(Error::core(format!("Connection '{}' not found", conn.name)));
         }
 
         Ok(())
@@ -294,12 +294,13 @@ impl Database {
             [],
             |row| {
                 let value: Vec<u8> = row.get(0)?;
-                String::from_utf8(value)
-                    .map_err(|e| rusqlite::Error::FromSqlConversionFailure(
+                String::from_utf8(value).map_err(|e| {
+                    rusqlite::Error::FromSqlConversionFailure(
                         0,
                         rusqlite::types::Type::Blob,
-                        Box::new(e)
-                    ))
+                        Box::new(e),
+                    )
+                })
             },
         );
 

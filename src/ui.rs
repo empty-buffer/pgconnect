@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Result};
+use crate::error::{Error, Result};
 use dialoguer::{theme::ColorfulTheme, Input, Password, Select, Confirm};
 use std::process::Command;
 
@@ -41,7 +41,7 @@ pub fn select_preferred_client(db: &Database) -> Result<ClientType> {
     let available = detect_available_clients();
 
     if available.is_empty() {
-        return Err(anyhow!("No PostgreSQL clients found. Please install psql or pgcli."));
+        return Err(Error::core("No PostgreSQL clients found. Please install psql or pgcli."));
     }
 
     if available.len() == 1 {
@@ -83,7 +83,7 @@ pub fn change_preferred_client(db: &Database) -> Result<()> {
     let available = detect_available_clients();
 
     if available.is_empty() {
-        return Err(anyhow!("No PostgreSQL clients found. Please install psql or pgcli."));
+        return Err(Error::core("No PostgreSQL clients found. Please install psql or pgcli."));
     }
 
     // Show current preference if set
@@ -189,9 +189,9 @@ pub fn interactive_select(db: &Database) -> Result<()> {
 
     // Get preferred client
     let client_str = db.get_preferred_client()?
-        .ok_or_else(|| anyhow!("Preferred client not set. Please run setup again."))?;
+        .ok_or_else(|| Error::core("Preferred client not set. Please run setup again."))?;
     let client = ClientType::from_str(&client_str)
-        .ok_or_else(|| anyhow!("Invalid preferred client: {}", client_str))?;
+        .ok_or_else(|| Error::core(format!("Invalid preferred client: {}", client_str)))?;
 
     let items: Vec<String> = connections.iter().map(|c| c.display_name()).collect();
 
@@ -234,7 +234,7 @@ pub fn launch_client(conn: &Connection, client: ClientType) -> Result<()> {
                 .status()?;
 
             if !status.success() {
-                return Err(anyhow!("psql exited with error"));
+                return Err(Error::core("psql exited with error"));
             }
         }
         ClientType::Pgcli => {
@@ -254,7 +254,7 @@ pub fn launch_client(conn: &Connection, client: ClientType) -> Result<()> {
                 .status()?;
 
             if !status.success() {
-                return Err(anyhow!("pgcli exited with error"));
+                return Err(Error::core("pgcli exited with error"));
             }
         }
     }

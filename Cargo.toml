@@ -21,5 +21,6 @@ aes-gcm = "0.10"
 argon2 = "0.5"
 directories = "5"
 rand = "0.8"
-anyhow = "1"
 urlencoding = "2"
+
+derive_more = { version = "2", features = ["from"]}

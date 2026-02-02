@@ -24,7 +24,7 @@ cargo install --path .
 Or install from git:
 
 ```bash
-cargo install --git https://github.com/yourusername/pgconnect.git
+cargo install --git https://github.com/empty-buffer/pgconnect.git
 ```
 
 This installs to `~/.cargo/bin/` (make sure it's in your PATH).

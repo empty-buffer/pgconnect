@@ -2,15 +2,17 @@ mod client;
 mod connection;
 mod crypto;
 mod db;
+mod error;
 mod ui;
 
-use anyhow::Result;
+use self::error::Result;
+// use anyhow::Result;
 use clap::{Parser, Subcommand};
 
 use crate::db::Database;
 use crate::ui::{
-    change_preferred_client, confirm_remove, ensure_unlocked, interactive_select,
-    list_connections, prompt_connection_details,
+    change_preferred_client, confirm_remove, ensure_unlocked, interactive_select, list_connections,
+    prompt_connection_details,
 };
 
 #[derive(Parser)]
@@ -55,12 +57,15 @@ fn main() -> Result<()> {
         Some(Commands::Add) => {
             ensure_unlocked(&mut db)?;
             let conn = prompt_connection_details(None)?;
-            
+
             match db.add_connection(&conn) {
                 Ok(_) => println!("\nConnection '{}' added successfully!", conn.name),
                 Err(e) => {
                     if e.to_string().contains("UNIQUE constraint failed") {
-                        println!("\nError: A connection with name '{}' already exists.", conn.name);
+                        println!(
+                            "\nError: A connection with name '{}' already exists.",
+                            conn.name
+                        );
                     } else {
                         return Err(e);
                     }
@@ -73,7 +78,7 @@ fn main() -> Result<()> {
         }
         Some(Commands::Edit { name }) => {
             ensure_unlocked(&mut db)?;
-            
+
             let existing = db.get_connection_by_name(&name)?;
             match existing {
                 Some(conn) => {
@@ -89,12 +94,12 @@ fn main() -> Result<()> {
         }
         Some(Commands::Remove { name }) => {
             ensure_unlocked(&mut db)?;
-            
+
             if db.get_connection_by_name(&name)?.is_none() {
                 println!("Connection '{}' not found.", name);
                 return Ok(());
             }
-            
+
             if confirm_remove(&name)? {
                 db.remove_connection(&name)?;
                 println!("Connection '{}' removed.", name);
