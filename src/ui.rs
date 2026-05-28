@@ -233,7 +233,15 @@ pub fn prompt_connection_details(existing: Option<&Connection>) -> Result<Connec
         if matches!(setup_mode, Some(1)) {
             let uri: String = Input::with_theme(&theme)
                 .with_prompt("MongoDB URI")
-                .with_initial_text("mongodb://user:password@localhost:27017/mydb?authSource=admin")
+                .with_initial_text(
+                    existing
+                        .map(|c| c.mongo_uri.clone())
+                        .filter(|u| !u.is_empty())
+                        .unwrap_or_else(|| {
+                            "mongodb://user:password@localhost:27017/mydb?authSource=admin"
+                                .to_string()
+                        }),
+                )
                 .interact_text()?;
 
             let parsed = parse_mongodb_uri(&uri)?;
