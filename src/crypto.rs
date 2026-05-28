@@ -1,9 +1,9 @@
+use crate::error::{Error, Result};
 use aes_gcm::{
     aead::{Aead, KeyInit},
     Aes256Gcm, Nonce,
 };
 use argon2::{password_hash::SaltString, Argon2, PasswordHasher, PasswordVerifier};
-use crate::error::{Error, Result};
 use rand::rngs::OsRng;
 
 const NONCE_SIZE: usize = 12;
@@ -39,8 +39,8 @@ pub fn generate_nonce() -> [u8; NONCE_SIZE] {
 /// Encrypts a password using AES-256-GCM
 /// Returns (ciphertext, nonce)
 pub fn encrypt_password(password: &str, key: &[u8; 32]) -> Result<(Vec<u8>, [u8; NONCE_SIZE])> {
-    let cipher =
-        Aes256Gcm::new_from_slice(key).map_err(|e| Error::core(format!("Failed to create cipher: {}", e)))?;
+    let cipher = Aes256Gcm::new_from_slice(key)
+        .map_err(|e| Error::core(format!("Failed to create cipher: {}", e)))?;
 
     let nonce_bytes = generate_nonce();
     let nonce = Nonce::from_slice(&nonce_bytes);
@@ -54,8 +54,8 @@ pub fn encrypt_password(password: &str, key: &[u8; 32]) -> Result<(Vec<u8>, [u8;
 
 /// Decrypts a password using AES-256-GCM
 pub fn decrypt_password(ciphertext: &[u8], nonce: &[u8], key: &[u8; 32]) -> Result<String> {
-    let cipher =
-        Aes256Gcm::new_from_slice(key).map_err(|e| Error::core(format!("Failed to create cipher: {}", e)))?;
+    let cipher = Aes256Gcm::new_from_slice(key)
+        .map_err(|e| Error::core(format!("Failed to create cipher: {}", e)))?;
 
     let nonce = Nonce::from_slice(nonce);
 
@@ -63,7 +63,8 @@ pub fn decrypt_password(ciphertext: &[u8], nonce: &[u8], key: &[u8; 32]) -> Resu
         .decrypt(nonce, ciphertext)
         .map_err(|_| Error::core("Decryption failed - incorrect master password?"))?;
 
-    String::from_utf8(plaintext).map_err(|e| Error::core(format!("Invalid UTF-8 in decrypted password: {}", e)))
+    String::from_utf8(plaintext)
+        .map_err(|e| Error::core(format!("Invalid UTF-8 in decrypted password: {}", e)))
 }
 
 /// Hashes the master password for verification (stored in DB)
@@ -80,8 +81,8 @@ pub fn hash_master_password(password: &str) -> Result<String> {
 
 /// Verifies the master password against stored hash
 pub fn verify_master_password(password: &str, hash: &str) -> Result<bool> {
-    let parsed_hash =
-        argon2::PasswordHash::new(hash).map_err(|e| Error::core(format!("Invalid password hash: {}", e)))?;
+    let parsed_hash = argon2::PasswordHash::new(hash)
+        .map_err(|e| Error::core(format!("Invalid password hash: {}", e)))?;
 
     let argon2 = Argon2::default();
     Ok(argon2

@@ -12,7 +12,7 @@ use clap::{Parser, Subcommand};
 use crate::db::Database;
 use crate::ui::{
     change_preferred_client, confirm_remove, ensure_unlocked, interactive_select, list_connections,
-    prompt_connection_details,
+    prompt_connection_details, show_status,
 };
 
 #[derive(Parser)]
@@ -40,8 +40,10 @@ enum Commands {
         /// Name of the connection to remove
         name: String,
     },
-    /// Set preferred PostgreSQL client (psql or pgcli)
+    /// Set preferred client (psql, pgcli, mongosh, or redis-cli)
     SetClient,
+    /// Show client/tool installation status
+    Status,
 }
 
 fn main() -> Result<()> {
@@ -84,8 +86,19 @@ fn main() -> Result<()> {
                 Some(conn) => {
                     println!("Editing connection '{}'\n", name);
                     let updated = prompt_connection_details(Some(&conn))?;
-                    db.update_connection(&updated)?;
-                    println!("\nConnection '{}' updated successfully!", updated.name);
+                    match db.update_connection(&name, &updated) {
+                        Ok(_) => println!("\nConnection '{}' updated successfully!", updated.name),
+                        Err(e) => {
+                            if e.to_string().contains("UNIQUE constraint failed") {
+                                println!(
+                                    "\nError: A connection with name '{}' already exists.",
+                                    updated.name
+                                );
+                            } else {
+                                return Err(e);
+                            }
+                        }
+                    }
                 }
                 None => {
                     println!("Connection '{}' not found.", name);
@@ -109,6 +122,9 @@ fn main() -> Result<()> {
         }
         Some(Commands::SetClient) => {
             change_preferred_client(&db)?;
+        }
+        Some(Commands::Status) => {
+            show_status()?;
         }
     }
 

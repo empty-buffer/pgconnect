@@ -1,6 +1,6 @@
 # pgconnect
 
-PostgreSQL connection manager CLI with encrypted storage. Store and manage PostgreSQL connection configurations securely, then connect with an interactive menu using your preferred client (psql or pgcli).
+PostgreSQL connection manager CLI with encrypted storage. Store and manage PostgreSQL connection configurations securely, then connect with an interactive menu using your preferred client (`psql`, `pgcli`, `mongosh`, or `redis-cli`).
 
 ## Features
 
@@ -8,7 +8,7 @@ PostgreSQL connection manager CLI with encrypted storage. Store and manage Postg
 - 🔑 Master password protection with Argon2id
 - 📦 SQLite-based storage
 - 🎯 Interactive connection selector
-- 🔄 Support for both `psql` and `pgcli` clients
+- 🔄 Support for `psql`, `pgcli`, `mongosh`, and `redis-cli` clients
 - ✨ Full CRUD operations for connections
 
 ## Installation
@@ -81,13 +81,16 @@ pgconnect add
 
 You'll be prompted to:
 1. Set a master password (encrypts your database credentials)
-2. Choose your preferred PostgreSQL client (psql or pgcli)
+2. Choose your preferred client (`psql`, `pgcli`, `mongosh`, or `redis-cli`)
 
 ### Commands
 
 ```bash
 # Interactive connection selector (default)
 pgconnect
+
+# Show installed client/tool status
+pgconnect status
 
 # Add a new connection
 pgconnect add
@@ -101,7 +104,7 @@ pgconnect edit <connection-name>
 # Remove a connection
 pgconnect remove <connection-name>
 
-# Change preferred client (psql/pgcli)
+# Change preferred client per database type (postgres: psql/pgcli; mongodb: mongosh; redis: redis-cli)
 pgconnect set-client
 ```
 
@@ -126,7 +129,7 @@ $ pgconnect
 ## Requirements
 
 - Rust 1.70+ (for building from source)
-- PostgreSQL client: `psql` or `pgcli` (at least one must be installed)
+- Database client: `psql`, `pgcli`, `mongosh`, or `redis-cli` (at least one must be installed)
 
 ## Data Storage
 

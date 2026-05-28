@@ -1,4 +1,4 @@
-.PHONY: build install uninstall clean test
+.PHONY: build install uninstall clean test run compose_up compose_down compose_teardown
 
 # Installation directory (can be overridden: make install INSTALL_DIR=/usr/bin)
 INSTALL_DIR ?= /usr/local/bin
@@ -24,6 +24,18 @@ clean:
 test:
 	cargo test
 
+run:
+	cargo run
+
 # Install to user's cargo bin directory (no sudo required)
 install-user:
 	cargo install --path . --force
+
+compose_up:
+	docker compose -f deploy/docker-compose.yml up -d
+
+compose_down:
+	docker compose -f deploy/docker-compose.yml down
+
+compose_teardown:
+	docker compose -f deploy/docker-compose.yml down -v

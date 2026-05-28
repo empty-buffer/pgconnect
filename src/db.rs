@@ -4,7 +4,8 @@ use rusqlite::{params, Connection as SqliteConnection};
 use std::fs;
 use std::path::PathBuf;
 
-use crate::connection::Connection;
+use crate::client::ClientType;
+use crate::connection::{Connection, DbType};
 use crate::crypto::{
     decrypt_password, derive_key, encrypt_password, generate_salt, hash_master_password,
     verify_master_password,
@@ -58,6 +59,7 @@ impl Database {
             "CREATE TABLE IF NOT EXISTS connections (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL UNIQUE,
+                db_type TEXT NOT NULL DEFAULT 'postgres',
                 host TEXT NOT NULL,
                 port INTEGER NOT NULL,
                 database TEXT NOT NULL,
@@ -68,7 +70,29 @@ impl Database {
             [],
         )?;
 
+        // Best-effort schema migration for older DBs (pre db_type column)
+        if !self.column_exists("connections", "db_type")? {
+            self.conn.execute(
+                "ALTER TABLE connections ADD COLUMN db_type TEXT NOT NULL DEFAULT 'postgres'",
+                [],
+            )?;
+        }
+
         Ok(())
+    }
+
+    fn column_exists(&self, table: &str, column: &str) -> Result<bool> {
+        let mut stmt = self
+            .conn
+            .prepare(&format!("PRAGMA table_info({})", table))?;
+        let mut rows = stmt.query([])?;
+        while let Some(row) = rows.next()? {
+            let name: String = row.get(1)?;
+            if name == column {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 
     /// Checks if the master password has been set up
@@ -145,10 +169,11 @@ impl Database {
         let (encrypted_password, nonce) = encrypt_password(&conn.password, key)?;
 
         self.conn.execute(
-            "INSERT INTO connections (name, host, port, database, username, encrypted_password, nonce)
-             VALUES (?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO connections (name, db_type, host, port, database, username, encrypted_password, nonce)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             params![
                 conn.name,
+                conn.db_type.as_str(),
                 conn.host,
                 conn.port as i64,
                 conn.database,
@@ -166,7 +191,7 @@ impl Database {
         let key = self.get_key()?;
 
         let mut stmt = self.conn.prepare(
-            "SELECT id, name, host, port, database, username, encrypted_password, nonce
+            "SELECT id, name, db_type, host, port, database, username, encrypted_password, nonce
              FROM connections ORDER BY name",
         )?;
 
@@ -176,21 +201,26 @@ impl Database {
                     row.get::<_, i64>(0)?,
                     row.get::<_, String>(1)?,
                     row.get::<_, String>(2)?,
-                    row.get::<_, i64>(3)?,
-                    row.get::<_, String>(4)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, i64>(4)?,
                     row.get::<_, String>(5)?,
-                    row.get::<_, Vec<u8>>(6)?,
+                    row.get::<_, String>(6)?,
                     row.get::<_, Vec<u8>>(7)?,
+                    row.get::<_, Vec<u8>>(8)?,
                 ))
             })?
             .collect::<std::result::Result<Vec<_>, rusqlite::Error>>()?;
 
         let mut result = Vec::new();
-        for (id, name, host, port, database, username, encrypted_password, nonce) in connections {
+        for (id, name, db_type, host, port, database, username, encrypted_password, nonce) in
+            connections
+        {
             let password = decrypt_password(&encrypted_password, &nonce, key)?;
             result.push(Connection {
                 id,
                 name,
+                db_type: crate::connection::DbType::from_str(&db_type)
+                    .unwrap_or(crate::connection::DbType::Postgres),
                 host,
                 port: port as u16,
                 database,
@@ -207,7 +237,7 @@ impl Database {
         let key = self.get_key()?;
 
         let result = self.conn.query_row(
-            "SELECT id, name, host, port, database, username, encrypted_password, nonce
+            "SELECT id, name, db_type, host, port, database, username, encrypted_password, nonce
              FROM connections WHERE name = ?",
             params![name],
             |row| {
@@ -215,21 +245,24 @@ impl Database {
                     row.get::<_, i64>(0)?,
                     row.get::<_, String>(1)?,
                     row.get::<_, String>(2)?,
-                    row.get::<_, i64>(3)?,
-                    row.get::<_, String>(4)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, i64>(4)?,
                     row.get::<_, String>(5)?,
-                    row.get::<_, Vec<u8>>(6)?,
+                    row.get::<_, String>(6)?,
                     row.get::<_, Vec<u8>>(7)?,
+                    row.get::<_, Vec<u8>>(8)?,
                 ))
             },
         );
 
         match result {
-            Ok((id, name, host, port, database, username, encrypted_password, nonce)) => {
+            Ok((id, name, db_type, host, port, database, username, encrypted_password, nonce)) => {
                 let password = decrypt_password(&encrypted_password, &nonce, key)?;
                 Ok(Some(Connection {
                     id,
                     name,
+                    db_type: crate::connection::DbType::from_str(&db_type)
+                        .unwrap_or(crate::connection::DbType::Postgres),
                     host,
                     port: port as u16,
                     database,
@@ -242,28 +275,33 @@ impl Database {
         }
     }
 
-    /// Updates an existing connection
-    pub fn update_connection(&self, conn: &Connection) -> Result<()> {
+    /// Updates an existing connection (looked up by `original_name`)
+    pub fn update_connection(&self, original_name: &str, conn: &Connection) -> Result<()> {
         let key = self.get_key()?;
         let (encrypted_password, nonce) = encrypt_password(&conn.password, key)?;
 
         let rows = self.conn.execute(
             "UPDATE connections 
-             SET host = ?, port = ?, database = ?, username = ?, encrypted_password = ?, nonce = ?
+             SET name = ?, db_type = ?, host = ?, port = ?, database = ?, username = ?, encrypted_password = ?, nonce = ?
              WHERE name = ?",
             params![
+                conn.name,
+                conn.db_type.as_str(),
                 conn.host,
                 conn.port as i64,
                 conn.database,
                 conn.username,
                 encrypted_password,
                 &nonce[..],
-                conn.name
+                original_name
             ],
         )?;
 
         if rows == 0 {
-            return Err(Error::core(format!("Connection '{}' not found", conn.name)));
+            return Err(Error::core(format!(
+                "Connection '{}' not found",
+                original_name
+            )));
         }
 
         Ok(())
@@ -287,11 +325,14 @@ impl Database {
         Ok(count as usize)
     }
 
-    /// Gets the preferred client from settings
-    pub fn get_preferred_client(&self) -> Result<Option<String>> {
+    fn preferred_client_key(db_type: DbType) -> String {
+        format!("preferred_client:{}", db_type.as_str())
+    }
+
+    fn get_setting(&self, key: &str) -> Result<Option<String>> {
         let result = self.conn.query_row(
-            "SELECT value FROM settings WHERE key = 'preferred_client'",
-            [],
+            "SELECT value FROM settings WHERE key = ?",
+            params![key],
             |row| {
                 let value: Vec<u8> = row.get(0)?;
                 String::from_utf8(value).map_err(|e| {
@@ -311,11 +352,47 @@ impl Database {
         }
     }
 
-    /// Sets the preferred client in settings
-    pub fn set_preferred_client(&self, client: &str) -> Result<()> {
+    /// Gets the preferred client for a database type.
+    pub fn get_preferred_client(&self, db_type: DbType) -> Result<Option<String>> {
+        if let Some(client) = self.get_setting(&Self::preferred_client_key(db_type))? {
+            return Ok(Some(client));
+        }
+
+        // Legacy single key (postgres only)
+        if db_type == DbType::Postgres {
+            if let Some(client) = self.get_setting("preferred_client")? {
+                if ClientType::from_str(&client)
+                    .is_some_and(|c| c.is_compatible_with(DbType::Postgres))
+                {
+                    return Ok(Some(client));
+                }
+            }
+        }
+
+        Ok(None)
+    }
+
+    /// Sets the preferred client for a database type (must be compatible).
+    pub fn set_preferred_client(&self, db_type: DbType, client: &str) -> Result<()> {
+        let client_type = ClientType::from_str(client)
+            .ok_or_else(|| Error::core(format!("Unknown client: {}", client)))?;
+
+        if !client_type.is_compatible_with(db_type) {
+            let allowed: Vec<&str> = ClientType::allowed_for(db_type)
+                .iter()
+                .map(|c| c.as_str())
+                .collect();
+            return Err(Error::core(format!(
+                "{} cannot be used with {} connections (allowed: {})",
+                client,
+                db_type.as_str(),
+                allowed.join(", ")
+            )));
+        }
+
         self.conn.execute(
-            "INSERT OR REPLACE INTO settings (key, value) VALUES ('preferred_client', ?)",
-            params![client.as_bytes()],
+            "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)",
+            params![Self::preferred_client_key(db_type), client.as_bytes()],
         )?;
         Ok(())
     }
