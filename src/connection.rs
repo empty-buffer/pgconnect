@@ -35,6 +35,8 @@ pub struct Connection {
     pub host: String,
     pub port: u16,
     pub database: String,
+    pub auth_source: String,
+    pub mongo_uri: String,
     pub username: String,
     pub password: String,
 }
@@ -46,6 +48,8 @@ impl Connection {
         host: String,
         port: u16,
         database: String,
+        auth_source: String,
+        mongo_uri: String,
         username: String,
         password: String,
     ) -> Self {
@@ -56,6 +60,8 @@ impl Connection {
             host,
             port,
             database,
+            auth_source,
+            mongo_uri,
             username,
             password,
         }

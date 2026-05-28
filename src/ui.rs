@@ -221,6 +221,36 @@ pub fn prompt_connection_details(existing: Option<&Connection>) -> Result<Connec
         .with_initial_text(existing.map(|c| c.name.clone()).unwrap_or_default())
         .interact_text()?;
 
+    // MongoDB-specific shortcut: allow creating connection from full URI.
+    if db_type == DbType::Mongodb {
+        let setup_mode_items = ["Manual fields", "MongoDB URI"];
+        let setup_mode = Select::with_theme(&theme)
+            .with_prompt("MongoDB setup mode")
+            .items(&setup_mode_items)
+            .default(0)
+            .interact_opt()?;
+
+        if matches!(setup_mode, Some(1)) {
+            let uri: String = Input::with_theme(&theme)
+                .with_prompt("MongoDB URI")
+                .with_initial_text("mongodb://user:password@localhost:27017/mydb?authSource=admin")
+                .interact_text()?;
+
+            let parsed = parse_mongodb_uri(&uri)?;
+            return Ok(Connection::new(
+                name,
+                DbType::Mongodb,
+                parsed.host,
+                parsed.port,
+                parsed.database,
+                parsed.auth_source,
+                parsed.mongo_uri,
+                parsed.username,
+                parsed.password,
+            ));
+        }
+    }
+
     let host: String = Input::with_theme(&theme)
         .with_prompt("Host")
         .with_initial_text(
@@ -257,6 +287,20 @@ pub fn prompt_connection_details(existing: Option<&Connection>) -> Result<Connec
             ))
             .interact_text()?;
 
+    let auth_source: String = if db_type == DbType::Mongodb {
+        Input::with_theme(&theme)
+            .with_prompt("Auth source")
+            .with_initial_text(
+                existing
+                    .map(|c| c.auth_source.clone())
+                    .unwrap_or_else(|| "admin".to_string()),
+            )
+            .allow_empty(true)
+            .interact_text()?
+    } else {
+        "".to_string()
+    };
+
     let username: String = Input::with_theme(&theme)
         .with_prompt("Username")
         .with_initial_text(existing.map(|c| c.username.clone()).unwrap_or_default())
@@ -266,9 +310,159 @@ pub fn prompt_connection_details(existing: Option<&Connection>) -> Result<Connec
         .with_prompt("Password")
         .interact()?;
 
+    let mongo_uri = if db_type == DbType::Mongodb {
+        build_mongodb_uri(&host, port, &database, &auth_source, &username, &password)
+    } else {
+        String::new()
+    };
+
     Ok(Connection::new(
-        name, db_type, host, port, database, username, password,
+        name,
+        db_type,
+        host,
+        port,
+        database,
+        auth_source,
+        mongo_uri,
+        username,
+        password,
     ))
+}
+
+struct ParsedMongoUri {
+    host: String,
+    port: u16,
+    database: String,
+    auth_source: String,
+    mongo_uri: String,
+    username: String,
+    password: String,
+}
+
+fn parse_mongodb_uri(uri: &str) -> Result<ParsedMongoUri> {
+    let scheme_end = uri
+        .find("://")
+        .ok_or_else(|| Error::core("MongoDB URI must include scheme"))?;
+    let scheme = &uri[..scheme_end];
+    if scheme != "mongodb" && scheme != "mongodb+srv" {
+        return Err(Error::core(
+            "MongoDB URI must start with mongodb:// or mongodb+srv://",
+        ));
+    }
+
+    let remainder = &uri[scheme_end + 3..];
+    if remainder.is_empty() {
+        return Err(Error::core("MongoDB URI must include host information"));
+    }
+
+    let (authority, path_and_query) = match remainder.find('/') {
+        Some(i) => (&remainder[..i], &remainder[i + 1..]),
+        None => (remainder, ""),
+    };
+
+    let (userinfo, hosts_part) = match authority.rsplit_once('@') {
+        Some((u, h)) => (Some(u), h),
+        None => (None, authority),
+    };
+
+    if hosts_part.is_empty() {
+        return Err(Error::core("MongoDB URI must include a host"));
+    }
+
+    let first_host = hosts_part
+        .split(',')
+        .next()
+        .ok_or_else(|| Error::core("MongoDB URI must include a host"))?;
+
+    let (host, port) = parse_mongo_host_port(first_host, scheme == "mongodb+srv")?;
+
+    let (database_path, query) = match path_and_query.split_once('?') {
+        Some((p, q)) => (p, q),
+        None => (path_and_query, ""),
+    };
+
+    let database = if database_path.is_empty() {
+        "admin".to_string()
+    } else {
+        database_path.to_string()
+    };
+
+    let auth_source = query
+        .split('&')
+        .filter(|s| !s.is_empty())
+        .filter_map(|pair| pair.split_once('='))
+        .find_map(|(k, v)| (k == "authSource").then(|| v.to_string()))
+        .unwrap_or_else(|| "admin".to_string());
+
+    let (username, password) = match userinfo {
+        Some(ui) => {
+            let (u, p) = match ui.split_once(':') {
+                Some((u, p)) => (u, p),
+                None => (ui, ""),
+            };
+            (
+                urlencoding::decode(u)
+                    .map_err(|e| {
+                        Error::core(format!("Invalid username encoding in MongoDB URI: {}", e))
+                    })?
+                    .into_owned(),
+                urlencoding::decode(p)
+                    .map_err(|e| {
+                        Error::core(format!("Invalid password encoding in MongoDB URI: {}", e))
+                    })?
+                    .into_owned(),
+            )
+        }
+        None => (String::new(), String::new()),
+    };
+
+    Ok(ParsedMongoUri {
+        host,
+        port,
+        database,
+        auth_source,
+        mongo_uri: uri.to_string(),
+        username,
+        password,
+    })
+}
+
+fn parse_mongo_host_port(host_part: &str, is_srv: bool) -> Result<(String, u16)> {
+    if is_srv {
+        return Ok((host_part.to_string(), 27017));
+    }
+
+    if let Some((host, port_str)) = host_part.rsplit_once(':') {
+        let port = port_str
+            .parse::<u16>()
+            .map_err(|_| Error::core(format!("Invalid MongoDB port: {}", port_str)))?;
+        return Ok((host.to_string(), port));
+    }
+
+    Ok((host_part.to_string(), 27017))
+}
+
+fn build_mongodb_uri(
+    host: &str,
+    port: u16,
+    database: &str,
+    auth_source: &str,
+    username: &str,
+    password: &str,
+) -> String {
+    format!(
+        "mongodb://{}:{}@{}:{}/{}?authSource={}",
+        urlencoding::encode(username),
+        urlencoding::encode(password),
+        host,
+        port,
+        urlencoding::encode(database),
+        urlencoding::encode(if auth_source.is_empty() {
+            "admin"
+        } else {
+            auth_source
+        })
+    )
 }
 
 /// Shows interactive connection selector and launches the preferred client
@@ -382,16 +576,18 @@ fn launch_mongodb(conn: &Connection, client: ClientType) -> Result<()> {
         client.as_str()
     );
 
-    // mongosh uses MongoDB URI format: mongodb://user:password@host:port/database
-    let encoded_password = urlencoding::encode(&conn.password);
-    let uri = format!(
-        "mongodb://{}:{}@{}:{}/{}",
-        urlencoding::encode(&conn.username),
-        encoded_password,
-        urlencoding::encode(&conn.host),
-        conn.port,
-        urlencoding::encode(&conn.database)
-    );
+    let uri = if conn.mongo_uri.is_empty() {
+        build_mongodb_uri(
+            &conn.host,
+            conn.port,
+            &conn.database,
+            &conn.auth_source,
+            &conn.username,
+            &conn.password,
+        )
+    } else {
+        conn.mongo_uri.clone()
+    };
 
     let status = Command::new(client.as_str()).arg(&uri).status()?;
 
@@ -456,6 +652,16 @@ pub fn list_connections(db: &Database) -> Result<()> {
         println!("    Type:     {}", conn.db_type.as_str());
         println!("    Host:     {}:{}", conn.host, conn.port);
         println!("    Database: {}", conn.database);
+        if conn.db_type == DbType::Mongodb {
+            println!(
+                "    AuthSource: {}",
+                if conn.auth_source.is_empty() {
+                    "admin"
+                } else {
+                    &conn.auth_source
+                }
+            );
+        }
         println!("    Username: {}", conn.username);
         println!();
     }
